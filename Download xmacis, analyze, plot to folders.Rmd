@@ -1,0 +1,933 @@
+---
+title: "Plotting MEFEC temperature data"
+author: "K. Zamzow"
+date: "`r Sys.Date()`"
+output: html_document
+---
+#This scrip places all the plots in folders for easy viewing
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, message =FALSE, warning=FALSE, error = FALSE, eval=FALSE)
+```
+
+#install packages and directories
+```{r pac.ages, eval=FALSE}
+install.packages(c("httr", "jsonlite", "dplyr"))
+```
+
+```{r libraries}
+
+library(httr)
+library(jsonlite)
+library(dplyr)
+```
+
+```{r directories}
+base_dir<-"~/Chemical & physical environments/Alaska weather/Mat Valley weather"
+```
+
+#retrieve data directly from xmacis (need internet)
+```{r set up to get data directly from xmacis}
+#This is pulled from the website and will only work if internet is on
+#from AI
+get_xmacis_data <- function(sid, sdate, edate, elems) {
+  url <- "http://data.rcc-acis.org/StnData"
+  
+  body <- list(
+    sid = sid,
+    sdate = sdate,
+    edate = edate,
+    elems = elems
+  )
+  
+  response <- POST(url, body = body, encode = "json")
+  content <- content(response, "text")
+  data <- fromJSON(content)
+  
+  return(data$data)
+}
+
+```
+
+```{r run function to pull data in}
+#from AI
+# Set parameters
+station_id <- "505733"  # This should be MEFEC
+start_date <- "1917-07-05"
+end_date <- "2025-01-31"
+elements <- list(list(name="maxt"), list(name="mint"))
+
+# Fetch data
+temperature_data<- get_xmacis_data(station_id, start_date, end_date, elements)
+
+#convert to data frame
+temperature_df<-as.data.frame(temperature_data)
+
+colnames(temperature_df) <- c("date", "max_temp", "min_temp")
+
+# Display first few rows
+head(temperature_df)
+```
+
+```{r save the data}
+#from AI
+
+# Save as CSV in the base_dir
+write.csv(temperature_df, "MEFEC2025.02.15Temps.csv", row.names = FALSE)
+
+```
+
+```{r ensure temperatures are seen as numbers}
+
+Tmin<-as.numeric(temperature_df$min_temp, na.rm=TRUE)
+Tmax<-as.numeric(temperature_df$max_temp, na.rm=TRUE)
+```
+
+#Saving plots in folders
+```{r How to save plots, eval=FALSE}
+#create directories
+dir.create("annual_plots_temp", showWarnings = FALSE)
+dir.create("monthly_plots_tmax", showWarnings = FALSE)
+dir.create("monthly_plots_tmin", showWarnings = FALSE)
+
+#create lists to store them in
+annual_plots_temp <- list()
+monthly_plots_tmax <- list()
+monthly_plots_tmin <- list()
+
+#modify the ggsave
+  ggsave(
+    filename = paste0("monthly_plots_tmax/", month, "_tmax_plot.png"),
+    plot = plot_tmax,
+    width = 10,
+    height = 6,
+    units = "in",
+    dpi = 300
+  )
+  
+# Store Tmax plot in the list
+  monthly_plots_tmax[[month]] <- plot_tmax
+
+# Repeat the process for Tmin data
+  MonthTmin <- MonthTemp %>%
+    dplyr::select(date, min_temp) %>%
+    mutate(
+      Year = year(date),
+      Month = month(date, label = TRUE, abbr = TRUE)
+    )
+```
+
+#Plot annual 30-yr rolling averages
+```{r create a Month column from date, results='hide'}
+
+library (lubridate)
+library (dplyr)
+
+temperature_df<-temperature_df%>%
+  mutate(
+    Year = year(temperature_df$date),
+    Month = month(temperature_df$date, label = TRUE, abbr = TRUE)
+  )
+#abbr=TRUE puts all the dates as 3-letter abbreviations
+
+```
+
+```{r install package for rolling 30 year average, eval=FALSE}
+#from AI
+install.packages(tibbletime)
+```
+
+```{r annual TMin rolling 30 year average}
+
+library(tibbletime)
+library(zoo)
+
+#set up storage
+dir.create("annual_plots_temp", showWarnings = FALSE)
+annual_plots_temp <- list()
+
+# Prepare the data
+Tmin2<- temperature_df%>%
+  dplyr::select(date, min_temp) %>%
+  mutate(
+    Year = year(date),
+    Month = month(date, label = TRUE, abbr = TRUE)
+  )
+
+#chec/ for NAs, remove them, and count how many were removed
+Tmin2 <- Tmin2 %>%
+  filter(!is.na(min_temp))
+Tmin2$min_temp <- as.numeric(Tmin2$min_temp)
+sum(is.na(Tmin2$min_temp))
+
+# Function to calculate 30-year average
+calculate_30yr_avg <- function(data, start_year) {
+  data %>%
+    filter(Year >= start_year, Year < start_year + 30) %>%
+    summarise(min_temp_30yr = mean(min_temp, na.rm = TRUE))
+}
+
+# Calculate for each decade
+decades <- seq(1917, max(Tmin2$Year) - 29, by = 10)
+
+results<- data.frame()
+
+for (decade in decades) {
+  avg <- calculate_30yr_avg(Tmin2, decade)
+  results<- rbind(results, data.frame(start_year = decade, end_year = decade + 29, min_temp_30yr = avg$min_temp_30yr))
+}
+
+# View results
+print(results)
+```
+
+```{r plot annual TMin}
+library(ggplot2)
+
+#this is saved "manually" by exporting the image into folder "annual_plots_temp" instead of trying to automatically code it into a folder, which was having problems.
+
+ggplot(data=results)+aes(x=start_year, y=min_temp_30yr)+
+  geom_point()+
+  geom_smooth(method="lm", se=FALSE, color="blue")+
+  ylim(25,30)+
+  xlab("")+ylab("Temperature (F)")+
+  ggtitle("Minimum annual average temperatures 1917-2024", subtitle= "as 30-year averages by decade")+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))+
+  theme(axis.text=element_text(size=12))+
+  theme(title = element_text(size=14))
+```
+
+```{r save plots in folder, eval=FALSE}
+#use ggsave to create a file for storage
+#this doesn't seem to wor/ for annual, need to figure it out
+  ggsave(
+    filename = paste0("annual_plots_temp/", month, "_temp_plot.png"),
+    plot = plot_temp,
+    width = 10,
+    height = 6,
+    units = "in",
+    dpi = 300
+  )
+  
+# Store Tmax plot in the list
+  annual_plots_temp[[Year]] <- plot_temp
+```
+
+```{r annual TMax rolling 30 year average}
+
+#this gets to a list of results but no plot
+# Prepare the data
+Tmax2 <- temperature_df %>%
+  dplyr::select(date, max_temp) %>%
+  mutate(
+    Year = year(date),
+    Month = month(date, label = TRUE, abbr = TRUE)
+  )
+
+Tmax2$max_temp <- as.numeric(Tmax2$max_temp)
+
+# Function to calculate 30-year average
+calculate_30yr_avg <- function(data, start_year) {
+  data %>%
+    filter(Year >= start_year, Year < start_year + 30) %>%
+    summarise(max_temp_30yr = mean(max_temp, na.rm = TRUE))
+}
+
+# Calculate for each decade
+decades <- seq(1917, max(Tmax2$Year) - 29, by = 10)
+
+resultsTmax<- data.frame()
+for (decade in decades) {
+  avg <- calculate_30yr_avg(Tmax2, decade)
+  resultsTmax <- rbind(resultsTmax, data.frame(start_year = decade, end_year = decade + 29, max_temp_30yr = avg$max_temp_30yr))
+}
+
+# View results
+print(resultsTmax)
+```
+
+```{r plot annual TMax}
+library(ggplot2)
+
+#manually exported image into annual_temps folder
+ggplot(data=resultsTmax)+aes(x=start_year, y=max_temp_30yr)+
+  geom_point()+
+  geom_smooth(method="lm", se=FALSE, color="blue")+
+  ylim(41, 46)+
+  xlab("")+ylab("Temperature (F)")+
+  ggtitle("Maximum annual average temperatures 1917-2024", subtitle= "as 30-year averages by decade")+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))+
+  theme(axis.text=element_text(size=12))+
+  theme(title = element_text(size=14))
+
+```
+
+#Plot 30-yr rolling averages for an individual month
+```{r select a month for analysis}
+
+DecTemp<-temperature_df%>%
+  filter(Month == "Dec")
+DecTemp <- DecTemp %>%
+  filter(!is.na(max_temp))
+DecTemp$max_temp <- as.numeric(DecTemp$max_temp)
+
+write.csv(temperature_df, "MEFEC2025.02.15DecTemps.csv", row.names = FALSE)
+```
+
+```{r Dec max temps}
+#this gets to a list of results but no plot
+# Prepare the data
+DecTmax <- DecTemp%>%
+  dplyr::select(date, max_temp) %>%
+  mutate(
+    Year = year(date),
+    Month = month(date, label = TRUE, abbr = TRUE)
+  )
+
+# Function to calculate 30-year average
+calculate_30yr_avg <- function(data, start_year) {
+  data %>%
+    filter(Year >= start_year, Year < start_year + 30) %>%
+    summarise(max_temp_30yr = mean(max_temp, na.rm = TRUE))
+}
+
+# Calculate for each decade
+decades <- seq(1917, max(DecTmax$Year) - 29, by = 10)
+
+resultsDecTmax<- data.frame()
+for (decade in decades) {
+  avg <- calculate_30yr_avg(DecTmax, decade)
+  resultsDecTmax <- rbind(resultsDecTmax, data.frame(start_year = decade, end_year = decade + 29, max_temp_30yr = avg$max_temp_30yr))
+}
+
+# View results
+print(resultsDecTmax)
+```
+
+```{r plot DecTmax}
+library(ggplot2)
+#manually exported this into Tmax folder
+
+ggplot(data=resultsDecTmax)+aes(x=start_year, y=max_temp_30yr)+
+  geom_point()+  
+  geom_smooth(method="lm", se=FALSE, color="blue")+
+  ylim(10, 30)+
+  xlab("")+ylab("Temperature (F)")+
+  ggtitle("Maximum December average temperatures 1917-2024", subtitle= "as 30-year averages by decade")+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))+
+  theme(axis.text=element_text(size=12))+
+  theme(title = element_text(size=14))
+
+```
+
+```{r monthly Tmax and Tmin from AI placed in folders, eval=FALSE}
+#this goes all the way to placing monthly plots in Tmin and Tmax folders. It should wor/ but I created two separate chun/s instead
+
+#you need to specify months again
+months <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+print(months)
+
+#and ensure values are seen as numbers again
+temperature_df$max_temp <- as.numeric(temperature_df$max_temp)
+temperature_df$min_temp <- as.numeric(temperature_df$min_temp)
+
+
+#create directories
+dir.create("monthly_plots_tmax", showWarnings = FALSE)
+dir.create("monthly_plots_tmin", showWarnings = FALSE)
+
+# Create empty lists to store plots
+monthly_plots_tmax <- list()
+monthly_plots_tmin <- list()
+
+# Start the for-loop
+for (month in months) {
+  # Filter data for the current month
+  MonthTemp <- temperature_df %>%
+    filter(Month == month)
+  
+  # Prepare and plot Tmax data
+  MonthTmax <- MonthTemp %>%
+    dplyr::select(date, max_temp) %>%
+    mutate(
+      Year = year(date),
+      Month = month(date, label = TRUE, abbr = TRUE)
+    )
+  
+  MonthTmax$max_temp <- as.numeric(MonthTmax$max_temp)
+  
+  # Calculate 30-year average for Tmax
+  decades <- seq(1917, max(MonthTmax$Year) - 29, by = 10)
+  resultsMonthTmax <- data.frame()
+  
+  for (decade in decades) {
+    avg <- MonthTmax %>%
+      filter(Year >= decade, Year < decade + 30) %>%
+      summarise(max_temp_30yr = mean(max_temp, na.rm = TRUE))
+    
+    resultsMonthTmax <- rbind(resultsMonthTmax, 
+                              data.frame(start_year = decade, 
+                                         end_year = decade + 29, 
+                                         max_temp_30yr = avg$max_temp_30yr))
+  }
+  
+  # Calculate y-axis limits for Tmax
+  y_min_max <- floor(min(resultsMonthTmax$max_temp_30yr))
+  y_max_max <- y_min_max + 5
+  
+  # Create Tmax plot
+  plot_tmax <- ggplot(data = resultsMonthTmax) +
+    aes(x = start_year, y = max_temp_30yr) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    ylim(y_min_max, y_max_max) +
+    xlab("") + ylab("Temperature (F)") +
+    ggtitle(paste("Maximum", month, "average temperatures 1917-2024"),
+            subtitle = "as 30-year averages by decade") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          axis.text = element_text(size = 12),
+          title = element_text(size = 14))
+  
+  # Save Tmax plot
+  ggsave(
+    filename = paste0("monthly_plots_tmax/", month, "_tmax_plot.png"),
+    plot = plot_tmax,
+    width = 10,
+    height = 6,
+    units = "in",
+    dpi = 300
+  )
+  
+  # Store Tmax plot in the list
+  monthly_plots_tmax[[month]] <- plot_tmax
+  
+  # Repeat the process for Tmin data
+  MonthTmin <- MonthTemp %>%
+    dplyr::select(date, min_temp) %>%
+    mutate(
+      Year = year(date),
+      Month = month(date, label = TRUE, abbr = TRUE)
+    )
+  
+  MonthTmin$min_temp <- as.numeric(MonthTmin$min_temp)
+  
+  # Calculate 30-year average for Tmin
+  resultsMonthTmin <- data.frame()
+  
+  for (decade in decades) {
+    avg <- MonthTmin %>%
+      filter(Year >= decade, Year < decade + 30) %>%
+      summarise(min_temp_30yr = mean(min_temp, na.rm = TRUE))
+    
+    resultsMonthTmin <- rbind(resultsMonthTmin, 
+                              data.frame(start_year = decade, 
+                                         end_year = decade + 29, 
+                                         min_temp_30yr = avg$min_temp_30yr))
+  }
+  
+  # Calculate y-axis limits for Tmin
+  y_min_min <- floor(min(resultsMonthTmin$min_temp_30yr))
+  y_max_min <- y_min_min + 5
+  
+  # Create Tmin plot
+  plot_tmin <- ggplot(data = resultsMonthTmin) +
+    aes(x = start_year, y = min_temp_30yr) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    ylim(y_min_min, y_max_min) +
+    xlab("") + ylab("Temperature (F)") +
+    ggtitle(paste("Minimum", month, "average temperatures 1917-2024"),
+            subtitle = "as 30-year averages by decade") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          axis.text = element_text(size = 12),
+          title = element_text(size = 14))
+  
+  # Save Tmin plot
+  ggsave(
+    filename = paste0("monthly_plots_tmin/", month, "_tmin_plot.png"),
+    plot = plot_tmin,
+    width = 10,
+    height = 6,
+    units = "in",
+    dpi = 300
+  )
+  
+  # Store Tmin plot in the list
+  monthly_plots_tmin[[month]] <- plot_tmin
+}
+
+```
+
+```{r AI for monthly Tmax plots to folders}
+#this wor.s
+# Create a vector of all months
+months <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# Create an empty list to store Tmax plots
+monthly_plots_tmax <- list()
+
+# Create directory for Tmax plots
+dir.create("monthly_plots_tmax", showWarnings = FALSE)
+
+#ensure values are seen as numeric
+temperature_df$max_temp<-as.numeric(temperature_df$max_temp)
+
+# Start the for-loop for Tmax
+for (month in months) {
+  # Filter data for the current month
+  MonthTemp <- temperature_df %>%
+    filter(Month == month)
+  
+  # Prepare the data for max temperatures
+  MonthTmax <- MonthTemp %>%
+    dplyr::select(date, max_temp) %>%
+    mutate(
+      Year = year(date),
+      Month = month(date, label = TRUE, abbr = TRUE)
+    )
+  
+  MonthTmax$max_temp <- as.numeric(MonthTmax$max_temp)
+  
+  # Calculate 30-year average
+  decades <- seq(1917, max(MonthTmax$Year) - 29, by = 10)
+  resultsMonthTmax <- data.frame()
+  
+  for (decade in decades) {
+    avg <- MonthTmax %>%
+      filter(Year >= decade, Year < decade + 30) %>%
+      summarise(max_temp_30yr = mean(max_temp, na.rm = TRUE))
+    
+    resultsMonthTmax <- rbind(resultsMonthTmax, 
+                              data.frame(start_year = decade, 
+                                         end_year = decade + 29, 
+                                         max_temp_30yr = avg$max_temp_30yr))
+  }
+  
+    
+  # Calculate y-axis limits
+  y_min <- floor(min(resultsMonthTmax$max_temp_30yr))
+  y_max <- y_min + 5
+  
+  # Create plot for the current month
+  plot <- ggplot(data = resultsMonthTmax) +
+    aes(x = start_year, y = max_temp_30yr) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    ylim(y_min, y_max) +
+    xlab("") + ylab("Temperature (F)") +
+    ggtitle(paste("Maximum", month, "average temperatures 1917-2024"),
+            subtitle = "as 30-year averages by decade") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          axis.text = element_text(size = 12),
+          title = element_text(size = 14))
+  
+  # Save the plot
+  ggsave(
+    filename = paste0("monthly_plots_tmax/", month, "_tmax_plot.png"),
+    plot = plot,
+    width = 10,
+    height = 6,
+    units = "in",
+  )
+  
+  # Store the plot in the list
+  monthly_plots_tmax[[month]] <- plot
+}
+```
+
+```{r AI for monthly Tmin plots to folders}
+# This runs but is not placing plots in the monthly_plots_tmin folder. It had no problem putting them in a monthly_tmin_plots folder though??
+
+# Create a vector of all months
+months <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+#Create an empty list to store Tmin plots
+monthly_plots_tmin <- list()
+
+# Create directory for Tmin plots
+dir.create("monthly_plots_tmin", showWarnings = FALSE)
+
+#ma.e sure values are seen as numbers
+temperature_df$min_temp<-as.numeric(temperature_df$min_temp)
+
+# Start the for-loop for Tmin
+for (month in months) {
+  # Filter data for the current month
+  MonthTemp <- temperature_df %>%
+    filter(Month == month)
+  
+  # Prepare the data for min temperatures
+  MonthTmin <- MonthTemp %>%
+    dplyr::select(date, min_temp) %>%
+    mutate(
+      Year = year(date),
+      Month = month(date, label = TRUE, abbr = TRUE)
+    )
+  
+  MonthTmin$min_temp <- as.numeric(MonthTmin$min_temp)
+  
+  # Calculate 30-year average
+  decades <- seq(1917, max(MonthTmin$Year) - 29, by = 10)
+  resultsMonthTmin <- data.frame()
+  
+  for (decade in decades) {
+    avg <- MonthTmin %>%
+      filter(Year >= decade, Year < decade + 30) %>%
+      summarise(min_temp_30yr = mean(min_temp, na.rm = TRUE))
+    
+    resultsMonthTmin <- rbind(resultsMonthTmin, 
+                              data.frame(start_year = decade,
+                                         end_year = decade + 29,
+                                         min_temp_30yr =
+                                           avg$min_temp_30yr))
+  }
+  
+  # Calculate y-axis limits
+  y_min <- floor(min(resultsMonthTmin$min_temp_30yr))
+  y_max <- y_min + 5
+  
+  # Create plot for the current month
+  plot <- ggplot(data = resultsMonthTmin) +
+    aes(x = start_year, y = min_temp_30yr) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    ylim(y_min, y_max) +
+    xlab("") + ylab("Temperature (F)") +
+    ggtitle(paste("Minimum", month, "average temperatures 1917-2024"),
+            subtitle = "as 30-year averages by decade") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          axis.text = element_text(size = 12),
+          title = element_text(size = 14))
+  
+  # Save the plot
+  ggsave(
+    filename = paste0("monthly_plots_tmin/", month, "_tmin_plot.png"),
+    plot = plot,
+    width = 10,
+    height = 6,
+    units = "in",
+    dpi = 300
+  )
+  
+  # Store the plot in the list
+  monthly_plots_tmin[[month]] <- plot
+}
+
+```
+
+#Plot 30-yr rolling averages for all months, view as grid
+```{r Tmax for loop for each month gridplot}
+#this creates a grid of each individual month with Tmax rolling average. Store it by manually exporting to the Tmax folder. Change dimensions to be 1600 wide instead of 600 wide.
+
+# First, let's create a vector of all months
+months <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# Create an empty list to store plots
+monthly_plots <- list()
+
+# Start the for-loop
+for (month in months) {
+  # Filter data for the current month
+  MonthTemp <- temperature_df %>%
+    filter(Month == month)
+  
+  # Prepare the data for max temperatures
+  MonthTmax <- MonthTemp %>%
+    dplyr::select(date, max_temp) %>%
+    mutate(
+      Year = year(date),
+      Month = month(date, label = TRUE, abbr = TRUE)
+    )
+  
+  MonthTmax$max_temp <- as.numeric(MonthTmax$max_temp)
+  
+  # Calculate 30-year average
+  decades <- seq(1917, max(MonthTmax$Year) - 29, by = 10)
+  resultsMonthTmax <- data.frame()
+  
+  for (decade in decades) {
+    avg <- MonthTmax %>%
+      filter(Year >= decade, Year < decade + 30) %>%
+      summarise(max_temp_30yr = mean(max_temp, na.rm = TRUE))
+    
+    resultsMonthTmax <- rbind(resultsMonthTmax, 
+                              data.frame(start_year = decade, 
+                                         end_year = decade + 29, 
+                                         max_temp_30yr = avg$max_temp_30yr))
+  }
+  # Calculate y-axis limits
+  y_min <- floor(min(resultsMonthTmax$max_temp_30yr))
+  y_max <- y_min + 5
+  
+  # Create plot for the current month
+  plot <- ggplot(data = resultsMonthTmax) +
+    aes(x = start_year, y = max_temp_30yr) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    ylim(y_min, y_max) +
+    xlab("") + ylab("Temperature (F)") +
+    ggtitle(paste("Maximum", month, "average temperatures 1917-2024"),
+            subtitle = "as 30-year averages by decade") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          axis.text = element_text(size = 12),
+          title = element_text(size = 14))
+  
+  # Store the plot in the list
+  monthly_plots[[month]] <- plot
+}
+
+# Display all plots (you might want to adjust the layout for better visibility)
+library(gridExtra)
+do.call(grid.arrange, c(monthly_plots, ncol = 3))
+
+```
+
+```{r Tmin for loop for each month gridplot}
+
+# First, let's create a vector of all months
+months <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# Create an empty list to store plots
+monthly_plots <- list()
+
+# Start the for-loop
+for (month in months) {
+  # Filter data for the current month
+  MonthTemp <- temperature_df %>%
+    filter(Month == month)
+  
+  # Prepare the data for max temperatures
+  MonthTmin <- MonthTemp %>%
+    dplyr::select(date, min_temp) %>%
+    mutate(
+      Year = year(date),
+      Month = month(date, label = TRUE, abbr = TRUE)
+    )
+  
+  MonthTmin$min_temp <- as.numeric(MonthTmin$min_temp)
+  
+  # Calculate 30-year average
+  decades <- seq(1917, max(MonthTmin$Year) - 29, by = 10)
+  resultsMonthTmin <- data.frame()
+  
+  for (decade in decades) {
+    avg <- MonthTmin %>%
+      filter(Year >= decade, Year < decade + 30) %>%
+      summarise(min_temp_30yr = mean(min_temp, na.rm = TRUE))
+    
+    resultsMonthTmin <- rbind(resultsMonthTmin, 
+                              data.frame(start_year = decade, 
+                                         end_year = decade + 29, 
+                                         min_temp_30yr = avg$min_temp_30yr))
+  }
+  # Calculate y-axis limits
+  y_min <- floor(min(resultsMonthTmin$min_temp_30yr))
+  y_max <- y_min + 5
+  
+  # Create plot for the current month
+  plot <- ggplot(data = resultsMonthTmin) +
+    aes(x = start_year, y = min_temp_30yr) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    ylim(y_min, y_max) +
+    xlab("") + ylab("Temperature (F)") +
+    ggtitle(paste("Minimum", month, "average temperatures 1917-2024"),
+            subtitle = "as 30-year averages by decade") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          axis.text = element_text(size = 12),
+          title = element_text(size = 14))
+  
+  # Store the plot in the list
+  monthly_plots[[month]] <- plot
+}
+
+# Display all plots (you might want to adjust the layout for better visibility)
+library(gridExtra)
+do.call(grid.arrange, c(monthly_plots, ncol = 3))
+
+```
+
+
+#Plot 30-yr rolling averages for all months, view individually
+
+```{r run code to save each Tmin month plot individually, eval=FALSE}
+
+#superseded by line 321 code but /eep for eventually ta/ing out line 321 chun/ and modifying these chun/s
+# First, let's create a vector of all months
+months <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# Create an empty list to store plots
+Tminmonthly_plots <- list()
+
+#create a directory to store them in
+dir.create("monthly_plots", showWarnings = FALSE)
+
+# Start the for-loop
+for (month in months) {
+  # Filter data for the current month
+  MonthTemp <- temperature_df %>%
+    filter(Month == month)
+  
+  # Prepare the data for max temperatures
+  MonthTmin <- MonthTemp %>%
+    dplyr::select(date, min_temp) %>%
+    mutate(
+      Year = year(date),
+      Month = month(date, label = TRUE, abbr = TRUE)
+    )
+  
+  MonthTmin$min_temp <- as.numeric(MonthTmin$min_temp)
+  
+# Calculate 30-year average
+  decades <- seq(1917, max(MonthTmin$Year) - 29, by = 10)
+  
+  resultsMonthTmin <- data.frame()
+
+  for (decade in decades) {
+    avg <- MonthTmin %>%
+      filter(Year >= decade, Year < decade + 30) %>%
+      summarise(min_temp_30yr = mean(min_temp, na.rm = TRUE))
+    
+    resultsMonthTmin <- rbind(resultsMonthTmin, 
+                              data.frame(start_year = decade, 
+                                         end_year = decade + 29, 
+                                         min_temp_30yr = avg$min_temp_30yr))
+  }
+  
+# Calculate y-axis limits
+  y_min <- floor(min(resultsMonthTmin$min_temp_30yr))
+  y_max <- y_min + 5
+  
+# Create plot for the current month
+  plot <- ggplot(data = resultsMonthTmin) +
+    aes(x = start_year, y = min_temp_30yr) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    ylim(y_min, y_max) +
+    xlab("") + ylab("Temperature (F)") +
+    ggtitle(paste("Minimum", month, "average temperatures 1917-2024"),
+            subtitle = "as 30-year averages by decade") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          axis.text = element_text(size = 12),
+          title = element_text(size = 14))
+  
+  # Save the plot
+  ggsave(
+    filename = paste0("monthly_plots/", month, "_temperature_plot.png"),
+    plot = plot,
+    width = 10,
+    height = 6,
+    units = "in",
+    dpi = 300
+  )
+    # Store the plot in the list (if you still want to display them all together)
+  Tminmonthly_plots[[month]] <- plot
+}
+
+print(Tminmonthly_plots)
+```
+
+```{r run code to save each Tmax month plot individually, eval=FALSE}
+#superseded by line 321 code but /eep for eventually removing that chun/ and modifying this one
+# First, let's create a vector of all months
+months <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# Create an empty list to store plots
+Tmaxmonthly_plots <- list()
+
+#create a directory to store them in
+dir.create("monthly_plots", showWarnings = FALSE)
+
+# Start the for-loop
+for (month in months) {
+  # Filter data for the current month
+  MonthTemp <- temperature_df %>%
+    filter(Month == month)
+  
+  # Prepare the data for max temperatures
+  MonthTmax <- MonthTemp %>%
+    dplyr::select(date, max_temp) %>%
+    mutate(
+      Year = year(date),
+      Month = month(date, label = TRUE, abbr = TRUE)
+    )
+  
+  MonthTmax$max_temp <- as.numeric(MonthTmax$max_temp)
+  
+# Calculate 30-year average
+  decades <- seq(1917, max(MonthTmax$Year) - 29, by = 10)
+  
+  resultsMonthTmax <- data.frame()
+
+  for (decade in decades) {
+    avg <- MonthTmax %>%
+      filter(Year >= decade, Year < decade + 30) %>%
+      summarise(max_temp_30yr = mean(max_temp, na.rm = TRUE))
+    
+    resultsMonthTmax <- rbind(resultsMonthTmax, 
+                              data.frame(start_year = decade, 
+                                         end_year = decade + 29, 
+                                         max_temp_30yr = avg$max_temp_30yr))
+  }
+  
+# Calculate y-axis limits
+  y_min <- floor(min(resultsMonthTmax$max_temp_30yr))
+  y_max <- y_min + 5
+  
+# Create plot for the current month
+  plot <- ggplot(data = resultsMonthTmax) +
+    aes(x = start_year, y = max_temp_30yr) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    ylim(y_min, y_max) +
+    xlab("") + ylab("Temperature (F)") +
+    ggtitle(paste("maximum", month, "average temperatures 1917-2024"),
+            subtitle = "as 30-year averages by decade") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          axis.text = element_text(size = 12),
+          title = element_text(size = 14))
+  
+  # Save the plot
+  ggsave(
+    filename = paste0("monthly_plots/", month, "_temperature_plot.png"),
+    plot = plot,
+    width = 10,
+    height = 6,
+    units = "in",
+    dpi = 300
+  )
+    # Store the plot in the list (if you still want to display them all together)
+  Tmaxmonthly_plots[[month]] <- plot
+}
+
+print(Tmaxmonthly_plots)
+```
+
+```{r set up to save each month plot individually, eval=FALSE}
+#ditto - superseded by the AI version on line 321, but /eep this to brea/ out Tmax monthly, Tmin monthly, and the annual temps eventually 
+
+#create a directory to store them in
+dir.create("monthly_plots", showWarnings = FALSE)
+
+# Inside the for-loop, after creating the plot
+ggsave(
+  filename = paste0("monthly_plots/", month, "_temperature_plot.png"),
+  plot = plot,
+  width = 10,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+```
+
