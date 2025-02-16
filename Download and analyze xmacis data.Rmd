@@ -1,0 +1,228 @@
+---
+title: "Organizing downloaded MEFEC data"
+author: "K. Zamzow"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, message =FALSE, warning=FALSE, error = FALSE, eval=FALSE)
+```
+
+```{r pac.ages, eval=FALSE}
+install.packages(c("httr", "jsonlite", "dplyr"))
+```
+
+```{r libraries}
+library(httr)
+library(jsonlite)
+library(dplyr)
+```
+
+```{r}
+base_dir<-"~/Chemical & physical environments/Alaska weather/Mat Valley weather"
+```
+
+```{r set up to get data directly from xmacis}
+#from AI
+get_xmacis_data <- function(sid, sdate, edate, elems) {
+  url <- "http://data.rcc-acis.org/StnData"
+  
+  body <- list(
+    sid = sid,
+    sdate = sdate,
+    edate = edate,
+    elems = elems
+  )
+  
+  response <- POST(url, body = body, encode = "json")
+  content <- content(response, "text")
+  data <- fromJSON(content)
+  
+  return(data$data)
+}
+
+```
+
+```{r run function to pull data in}
+#from AI
+# Set parameters
+station_id <- "505733"  # This should be MEFEC
+start_date <- "1917-07-05"
+end_date <- "2025-01-31"
+elements <- list(list(name="maxt"), list(name="mint"))
+
+# Fetch data
+temperature_data<- get_xmacis_data(station_id, start_date, end_date, elements)
+
+#convert to data frame
+temperature_df<-as.data.frame(temperature_data)
+
+colnames(temperature_df) <- c("date", "max_temp", "min_temp")
+
+# Display first few rows
+head(temperature_df)
+```
+
+```{r save the data}
+#from AI
+
+# Save as CSV in the base_dir
+write.csv(temperature_df, "MEFEC2025.02.15Temps.csv", row.names = FALSE)
+
+```
+
+```{r ensure dates are seen as dates}
+Date<-as.Date.POSIXct(temperature_df$Date, na.rm=TRUE)
+```
+
+```{r ensure temperatures are seen as numbers}
+TMin<-as.numeric(temperature_df$min_temp, na.rm=TRUE)
+TMax<-as.numeric(temperature_df$max_temp, na.rm=TRUE)
+```
+
+```{r create a Month column from date, results='hide'}
+library (lubridate)
+library (dplyr)
+
+temperature_df<-temperature_df%>%
+  mutate(
+    Year = year(temperature_df$date),
+    Month = month(temperature_df$date, label = TRUE, abbr = TRUE)
+  )
+#abbr=TRUE puts all the dates as 3-letter abbreviations
+
+```
+
+```{r install package for rolling 30 year average, eval=FALSE}
+#from AI
+install.packages(tibbletime)
+```
+
+```{r TMin rolling 30 year average}
+
+library(tibbletime)
+library(zoo)
+
+# Prepare the data
+Tmin2 <- temperature_df %>%
+  dplyr::select(date, min_temp) %>%
+  mutate(
+    Year = year(date),
+    Month = month(date, label = TRUE, abbr = TRUE)
+  )
+
+Tmin2$min_temp <- as.numeric(Tmin2$min_temp)
+
+# Function to calculate 30-year average
+calculate_30yr_avg <- function(data, start_year) {
+  data %>%
+    filter(Year >= start_year, Year < start_year + 30) %>%
+    summarise(min_temp_30yr = mean(min_temp, na.rm = TRUE))
+}
+
+# Calculate for each decade
+decades <- seq(1917, max(Tmin2$Year) - 29, by = 10)
+
+results<- data.frame()
+for (decade in decades) {
+  avg <- calculate_30yr_avg(Tmin2, decade)
+  results <- rbind(results, data.frame(start_year = decade, end_year = decade + 29, min_temp_30yr = avg$min_temp_30yr))
+}
+
+# View results
+print(results)
+```
+
+```{r plot TMin}
+library(ggplot2)
+
+ggplot(data=results)+aes(x=start_year, y=min_temp_30yr)+
+  geom_point()+
+  geom_smooth(method="lm", se=FALSE, color="blue")+
+  ylim(25,30)+
+  xlab("")+ylab("Temperature (F)")+
+  ggtitle("Minimum annual average temperatures 1917-2024", subtitle= "as 30-year averages by decade")+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))+
+  theme(axis.text=element_text(size=12))+
+  theme(title = element_text(size=14))
+
+TMinplot
+```
+
+```{r TMax rolling 30 year average}
+
+# Prepare the data
+Tmax2 <- temperature_df %>%
+  dplyr::select(date, max_temp) %>%
+  mutate(
+    Year = year(date),
+    Month = month(date, label = TRUE, abbr = TRUE)
+  )
+
+Tmax2$max_temp <- as.numeric(Tmax2$max_temp)
+
+# Function to calculate 30-year average
+calculate_30yr_avg <- function(data, start_year) {
+  data %>%
+    filter(Year >= start_year, Year < start_year + 30) %>%
+    summarise(max_temp_30yr = mean(max_temp, na.rm = TRUE))
+}
+
+# Calculate for each decade
+decades <- seq(1917, max(Tmax2$Year) - 29, by = 10)
+
+resultsTmax<- data.frame()
+for (decade in decades) {
+  avg <- calculate_30yr_avg(Tmax2, decade)
+  resultsTmax <- rbind(resultsTmax, data.frame(start_year = decade, end_year = decade + 29, max_temp_30yr = avg$max_temp_30yr))
+}
+
+# View results
+print(resultsTmax)
+```
+
+```{r plot TMax}
+library(ggplot2)
+
+ggplot(data=resultsTmax)+aes(x=start_year, y=max_temp_30yr)+
+  geom_point()+
+  geom_smooth(method="lm", se=FALSE, color="blue")+
+  ylim(41, 46)+
+  xlab("")+ylab("Temperature (F)")+
+  ggtitle("Maximum annual average temperatures 1917-2024", subtitle= "as 30-year averages by decade")+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))+
+  theme(axis.text=element_text(size=12))+
+  theme(title = element_text(size=14))
+
+TMinplot
+```
+
+
+#DON'T RUN
+```{r another method, eval=FALSE}
+# Assuming your data frame is called 'temperature_df1'
+temperature_df1<- temperature_df1%>%
+  arrange(Year) %>%
+  mutate(
+    rolling_30yr_avg_max = rollmeanr(max_temp, k = 30*12, fill = NA),
+    rolling_30yr_avg_min = rollmeanr(min_temp, k = 30*12, fill = NA)
+  )
+
+# Assuming your data frame is called 'temperature_df'
+temperature_df <- temperature_df %>%
+  mutate(date = as.Date(paste(Year, Month, "01", sep="-"))) %>%
+  arrange(date) %>%
+  mutate(
+    rolling_30yr_avg_max = rollmeanr(max_temp, k = 30*12, fill = NA),
+    rolling_30yr_avg_min = rollmeanr(min_temp, k = 30*12, fill = NA)
+  )
+```
+
+```{r select a month for analysis,eval=FALSE}
+DecTemp<-temperature_df%>%
+  filter(Month == "Dec")
+```
